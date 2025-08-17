@@ -21,11 +21,17 @@ Adafruit_NeoPixel pixels = Adafruit_NeoPixel(pixel_num, pixel_pin, NEO_GRB + NEO
 // the time interval between traffic moving forwards and new traffic spawning
 const int move_traffic_interval = 1000; // miliseconds
 // the time interval between two player movements
-const int move_player_interval = 100; // miliseconds
+const int move_player_interval = 200; // miliseconds
 // max number of cars that can be spawned at a time
 const int max_cars = pixel_columns - 1;
+// min number of cars that can be spawned at a time
+// used to override the chance system at times
+const int min_cars = 1;
 // controls the spawn probability of traffic
-const int ease = 3;
+// should be more than 1
+const int ease = 2;
+// maximum length of a convoy that can be formed
+const int max_convoy_length = 3;
 
 // --------------
 // game variables
@@ -33,6 +39,8 @@ const int ease = 3;
 
 // 2D array, which represents if a car is present at a specific pixel
 int traffic[pixel_columns][pixel_rows];
+// if a convoy starts forming, this array tracks the length of that convoy
+int spawned_convoy[pixel_columns];
 // the column number of where the player is
 int player = 0;
 // the last timestamp when the traffic was moved
@@ -54,31 +62,74 @@ void reset() {
     for (int j = 0; j < pixel_rows; j++) {
       traffic[i][j] = 0;
     }
+    spawned_convoy[i] = 0;
   }
   player = 0;
   score = 0;
   game_over = 0;
 }
 
-// move traffic one pixel forward, and spawn in new traffic
-void move_traffic() {
+// handles the logic for spawning new traffic
+void spawn_traffic() {
   // the amount of new traffic that has been spawned into the top row so far
   int new_traffic = 0;
+  for (int i = 0; i < pixel_columns; i++) {
+    // spawns a new car in that column
+    // by a 1 in X (ease) chance
+    // but ignore chance if spawned cars are less
+    // than minimum (unless there are enough columns left)
+    // and we are desperate
+
+    if (random(ease) != 0) {
+      if (new_traffic < min_cars) {
+        if (pixel_columns - i - 1 > min_cars) {continue;}
+      } else {continue;}
+    }
+
+    // only if the spawned cars have not crossed the limit
+    if (new_traffic >= max_cars) {continue;}
+  
+    // if at the starting column
+    // avoid making a diagonal
+    if (i == 0 && traffic[i + 1][pixel_rows - 2] == 1) {continue;}
+  
+    // if at the ending column
+    // avoid making a diagonal
+    if (i == (pixel_columns - 1) && traffic[pixel_columns - 2][pixel_rows - 2] == 1) {continue;}
+  
+    // if at the middle columns
+    // avoid making a diagonal
+    if (i > 0 && i < (pixel_columns - 1)) {
+      if (traffic[i + 1][pixel_rows - 2] == 1 || traffic[i - 1][pixel_rows - 2] == 1) {continue;}
+    }
+  
+    // avoid making convoy longer than maximum length
+    if (spawned_convoy[i] >= max_convoy_length) {continue;}
+
+    traffic[i][pixel_rows - 1] = 1;
+    new_traffic++;
+  }
+  // update the convoy lengths
+  for (int i = 0; i < pixel_columns; i++) {
+    if (traffic[i][pixel_rows - 1]) {
+      spawned_convoy[i]++;
+    } else {
+      spawned_convoy[i] = 0;
+    }
+  }
+}
+
+// move traffic one pixel forward, and spawn in new traffic
+void move_traffic() {
   for (int i = 0; i < pixel_columns; i++) {
     // moves the row down
     for (int j = 0; j < pixel_rows - 1; j++) {
       traffic[i][j] = traffic[i][j + 1];
       traffic[i][j + 1] = 0;
     }
-
-    // spawns a new car in that column
-    // by a 1 in X (ease) chance
-    // and only if the row has not crossed the limit
-    if (random(ease) == 0 && new_traffic < max_cars) {
-      traffic[i][pixel_rows - 1] = 1;
-      new_traffic++;
-    }
   }
+
+  spawn_traffic();
 
   // for (int i = 0; i < pixel_columns; i++) {
   //   for (int j = 0; j < pixel_rows; j++) {
@@ -111,7 +162,7 @@ void light_leds() {
 // starter Arduino function
 void setup() {
   Serial.begin(9600);
-  randomSeed(random(100000));
+  randomSeed(millis());
 
   pinMode(left_btn, INPUT);
   pinMode(right_btn, INPUT);
